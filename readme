@@ -1,0 +1,32 @@
+🛣️ Endpoint: Obtener ruta de entrega de una orden
+
+Este endpoint permite consultar la ruta de entrega de una orden existente, utilizando el código de orden (OrderCode) almacenado en el archivo orders.csv.
+La ruta se calcula automáticamente a partir del mapa de relaciones definido en routes.pl, partiendo siempre desde CIUDAD NEILY.
+
+URL
+GET /order/route?order=<OrderCode>
+
+Descripción
+
+Retorna los puntos que deben recorrerse para entregar un pedido, desde el origen (CIUDAD NEILY) hasta el destino indicado en DeliveryPlace dentro de orders.csv.
+
+Utiliza un algoritmo de búsqueda en anchura (BFS) para determinar el camino más corto en número de tramos.
+
+El archivo orders.csv debe estar en el mismo directorio donde se ejecuta el servidor (supermarket.pl).
+
+Ejemplo 
+curl "http://localhost:8080/order/route?order=ORD0001"
+Respuesta del ejemplo
+{
+  "order": "ORD0001",
+  "origin": "CIUDAD NEILY",
+  "delivery_place": "NARANJO",
+  "steps": [
+    "CIUDAD NEILY",
+    "PASO CANOAS",
+    "LA CUESTA",
+    "LAUREL",
+    "NARANJO"
+  ],
+  "hops": 5
+}
