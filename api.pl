@@ -9,6 +9,12 @@
 :- http_handler(root(category), category_handler, []).
 :- http_handler(root(update), update_stock, []).
 
+:- use_module(library(csv)).        % read orders.csv
+:- use_module(routes).              % default_origin/1, route_path/3
+
+:- http_handler(root(order/route), order_route_handler, []).
+
+
 start_server(Port) :-
     http_server(http_dispatch, [port(Port)]),
     writeln('Servidor iniciado en el puerto ':Port).
@@ -65,3 +71,51 @@ category_handler(Request) :-
         Results
     ),
     reply_json(Results).
+
+% --- api.pl (helpers al final del archivo) ---
+normalize_place(Input, OutAtom) :-
+    (   atom(Input)   -> atom_string(Input, S0)
+    ;   string(Input) -> S0 = Input
+    ;   term_string(Input, S0)
+    ),
+    normalize_space(string(S1), S0),  % quita espacios duplicados
+    string_upper(S1, S2),             % convierte a MAYÚSCULAS
+    atom_string(OutAtom, S2).
+
+order_route_handler(Request) :-
+    http_parameters(Request, [order(OrderCode, [atom])]),
+    (   delivery_place_from_csv(OrderCode, Place0)
+    ->  normalize_place(Place0, Place),   % opcional pero recomendable
+        default_origin(Origin),
+        (   route_path(Origin, Place, Path)
+        ->  length(Path, Hops),
+            reply_json(json{
+                order: OrderCode,
+                origin: Origin,
+                delivery_place: Place,
+                steps: Path,            % <-- puntos visitados en orden
+                hops: Hops
+            })
+        ;   reply_json(json{
+                order: OrderCode,
+                error: "No route found from origin to delivery place",
+                origin: Origin,
+                delivery_place: Place
+            }, [status(404)])
+        )
+    ;   reply_json(json{error: "Order not found", order: OrderCode}, [status(404)])
+    ).
+
+% Extract DeliveryPlace from orders.csv given OrderCode
+% Expected header:
+% Date,Code,Product,Quantity,DeliveryPlace,ReceiverName,Status,OrderCode
+delivery_place_from_csv(OrderCode, Place) :-
+    exists_file('orders.csv'),
+    csv_read_file('orders.csv', Rows, [functor(row), arity(8)]),
+    (   Rows = [row('Date','Code','Product','Quantity','DeliveryPlace','ReceiverName','Status','OrderCode')|Data]
+    ->  true
+    ;   Data = Rows
+    ),
+    member(Row, Data),
+    arg(8, Row, OrderCode),   % column 8 = OrderCode
+    arg(5, Row, Place).       % column 5 = DeliveryPlace
