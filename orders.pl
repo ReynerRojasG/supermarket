@@ -1,4 +1,4 @@
-:- module(orders, [log_order/8]).
+:- module(orders, [next_order_code/1, log_order/8]).
 :- use_module(library(csv)).
 
 % =========================

@@ -11,8 +11,12 @@
 
 :- use_module(library(csv)).        % read orders.csv
 :- use_module(routes).              % default_origin/1, route_path/3
+:- use_module(orders).
 
 :- http_handler(root(order/route), order_route_handler, []).
+:- http_handler(root(orders), orders_post_handler, []).
+:- http_handler(root(orders/list), orders_get_handler, []).
+:- http_handler(root(orders/update), update_order_status_handler, []).
 
 
 start_server(Port) :-
@@ -119,3 +123,85 @@ delivery_place_from_csv(OrderCode, Place) :-
     member(Row, Data),
     arg(8, Row, OrderCode),   % column 8 = OrderCode
     arg(5, Row, Place).       % column 5 = DeliveryPlace
+
+% ========================
+% Crear Orden (POST)
+% http://localhost:8080/orders  RUTA
+% ========================
+orders_post_handler(Request) :-
+    http_read_json_dict(Request, Data),
+
+    Code = Data.code,
+    Name = Data.name,
+    Quantity = Data.quantity,
+    DeliveryPlace = Data.deliveryPlace,
+    ReceiverName = Data.receiverName,
+    Date = Data.date,
+    ( _{status:S} :< Data -> Status = S ; Status = 'Pendiente' ),
+
+    next_order_code(OrderCode),
+    log_order(Date, Code, Name, Quantity, DeliveryPlace, ReceiverName, Status, OrderCode),
+
+    reply_json(json{
+        status:"OK",
+        orderCreated:OrderCode
+    }).
+
+% ========================
+% Listar Órdenes 
+%RUTA http://localhost:8080/orders/list
+% ========================
+orders_get_handler(_Request) :-
+    (   exists_file('orders.csv')
+    ->  csv_read_file('orders.csv', Rows, [functor(row), arity(8)]),
+        Rows = [_H|Data],
+        findall(
+            json{date:D, code:C, product:P, quantity:Q, deliveryPlace:DP, receiverName:RN, status:S, orderCode:OC},
+            (member(row(D,C,P,Q,DP,RN,S,OC), Data)),
+            JsonList
+        ),
+        reply_json(JsonList)
+    ;   reply_json([], [status(200)])
+    ).
+
+% ========================
+% Actualizar Estado Orden
+%ruta http://localhost:8080/orders/update?orderCode=ORD0001&status=Entregado
+% ========================
+update_order_status_handler(Request) :-
+    http_parameters(Request, [
+        orderCode(OrderCodeAtom, [atom]),
+        status(StatusAtom, [atom])
+    ]),
+    
+    atom_string(OrderCode, OrderCodeAtom),
+    atom_string(NewStatus, StatusAtom),
+
+    csv_read_file('orders.csv', Rows, [functor(row), arity(8)]),
+    Rows = [Header|Rest],
+
+    (
+        member(row(D,C,P,Q,DP,RN,_Old,OrderCode), Rest)
+    ->
+        maplist(
+            replace_order(OrderCode, NewStatus),
+            Rest,
+            NewRest
+        ),
+
+        open('orders.csv', write, S, [encoding(utf8)]),
+        csv_write_stream(S, [Header|NewRest], []),
+        close(S),
+
+        reply_json(json{
+            status:"actualizado",
+            order:OrderCode,
+            newStatus:NewStatus
+        })
+    ;
+        reply_json(json{error:"Orden no encontrada"}, [status(404)])
+    ).
+
+replace_order(OrderCode, NewStatus, row(D,C,P,Q,DP,RN,_Old,OrderCode),
+                                row(D,C,P,Q,DP,RN,NewStatus,OrderCode)) :- !.
+replace_order(_, _, Row, Row).
