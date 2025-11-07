@@ -3,6 +3,8 @@
 :- use_module(library(http/http_dispatch)).
 :- use_module(library(http/http_parameters)).
 :- use_module(library(http/http_json)).
+:- use_module(library(http/http_cors)).
+:- set_setting(http:cors, [*]).
 :- use_module(products).  % Importa los hechos
 
 :- http_handler(root(products), products_handler, []).
@@ -21,7 +23,7 @@
 
 start_server(Port) :-
     http_server(http_dispatch, [port(Port)]),
-    writeln('Servidor iniciado en el puerto ':Port).
+    format('Servidor iniciado en el puerto ~w~n', [Port]).
 
 % ========================
 % Endpoint de productos
@@ -30,6 +32,7 @@ start_server(Port) :-
 % Búsqueda insensible, encuentra BANANO o Banano o banano
 % Endpoint "GET": /products?name=Banano
 products_handler(Request) :-
+    cors_enable(Request, [methods([get])]),
     http_parameters(Request, [name(QueryAtom, [atom])]),
     downcase_atom(QueryAtom, QueryLower),
     findall(
@@ -48,6 +51,7 @@ products_handler(Request) :-
 %http://localhost:8080/update?code=P0001&quantity=50
 
 update_stock(Request) :-
+    cors_enable(Request, [methods([get, post])]),
     http_parameters(Request, [
         code(Code, [atom]),
         quantity(Quantity, [integer])
@@ -58,7 +62,7 @@ update_stock(Request) :-
             retract(product(Code, Name, Category, Price, Stock, Unit, Description)),
             assertz(product(Code, Name, Category, Price, NewStock, Unit, Description)),
             update_csv(Code, NewStock),
-            reply_json(json{status: "Stock actualizado", code: Code, new_stock: NewStock})
+            reply_json(json{status: "Stock actualizado", code: Code, new_stock:NewStock})
         ;   reply_json(json{error: "Stock insuficiente"}, [status(400)])
         )
     ;   reply_json(json{error: "Producto no encontrado"}, [status(404)])
@@ -67,6 +71,7 @@ update_stock(Request) :-
 % Endpoint "GET" para categoría:
 %% Endpoint: /category?type=frutas
 category_handler(Request) :-
+    cors_enable(Request, [methods([get])]),
     http_parameters(Request, [type(TypeStr, [atom])]),
     atom_string(Type, TypeStr),
     findall(
@@ -87,6 +92,7 @@ normalize_place(Input, OutAtom) :-
     atom_string(OutAtom, S2).
 
 order_route_handler(Request) :-
+    cors_enable(Request, [methods([get])]),
     http_parameters(Request, [order(OrderCode, [atom])]),
     (   delivery_place_from_csv(OrderCode, Place0)
     ->  normalize_place(Place0, Place),   % opcional pero recomendable
@@ -129,6 +135,7 @@ delivery_place_from_csv(OrderCode, Place) :-
 % http://localhost:8080/orders  RUTA
 % ========================
 orders_post_handler(Request) :-
+    cors_enable(Request, [methods([post])]),
     http_read_json_dict(Request, Data),
 
     Code = Data.code,
@@ -151,7 +158,8 @@ orders_post_handler(Request) :-
 % Listar Órdenes 
 %RUTA http://localhost:8080/orders/list
 % ========================
-orders_get_handler(_Request) :-
+orders_get_handler(Request) :-
+    cors_enable(Request, [methods([get])]),
     (   exists_file('orders.csv')
     ->  csv_read_file('orders.csv', Rows, [functor(row), arity(8)]),
         Rows = [_H|Data],
@@ -169,6 +177,7 @@ orders_get_handler(_Request) :-
 %ruta http://localhost:8080/orders/update?orderCode=ORD0001&status=Entregado
 % ========================
 update_order_status_handler(Request) :-
+    cors_enable(Request, [methods([get, post])]),
     http_parameters(Request, [
         orderCode(OrderCodeAtom, [atom]),
         status(StatusAtom, [atom])
