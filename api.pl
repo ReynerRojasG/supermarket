@@ -4,26 +4,44 @@
 :- use_module(library(http/http_parameters)).
 :- use_module(library(http/http_json)).
 :- use_module(library(http/http_cors)).
+
+% Habilita CORS para cualquier origen (permite que cors_enable funcione con cualquier *)
 :- set_setting(http:cors, [*]).
+
 :- use_module(products).  % Importa los hechos
-
-:- http_handler(root(products), products_handler, []).
-:- http_handler(root(category), category_handler, []).
-:- http_handler(root(update), update_stock, []).
-
 :- use_module(library(csv)).        % read orders.csv
 :- use_module(routes).              % default_origin/1, route_path/3
 :- use_module(orders).
 
+% ========================
+% Handlers HTTP
+% ========================
+:- http_handler(root(products), products_handler, []).
+:- http_handler(root(category), category_handler, []).
+:- http_handler(root(update), update_stock, []).
 :- http_handler(root(order/route), order_route_handler, []).
-:- http_handler(root(orders), orders_post_handler, []).
+:- http_handler(root(orders/create), orders_options_handler, [method(options)]).
+:- http_handler(root(orders/create), orders_post_handler, [method(post)]).
 :- http_handler(root(orders/list), orders_get_handler, []).
 :- http_handler(root(orders/update), update_order_status_handler, []).
 
+% ========================
+% Inicializar servidor
+% ========================
 
 start_server(Port) :-
     http_server(http_dispatch, [port(Port)]),
     format('Servidor iniciado en el puerto ~w~n', [Port]).
+
+% ========================
+% Preflight CORS para /orders
+% ========================
+orders_options_handler(Request) :-
+    cors_enable(Request, [
+        methods([post, options]),
+        headers(["content-type"])    
+    ]),
+    reply_json(json{status:"CORS OK"}).
 
 % ========================
 % Endpoint de productos
@@ -48,8 +66,7 @@ products_handler(Request) :-
     reply_json(Results).
 
 % Endpoint "UPDATE" para stock:
-%http://localhost:8080/update?code=P0001&quantity=50
-
+% http://localhost:8080/update?code=P0001&quantity=50
 update_stock(Request) :-
     cors_enable(Request, [methods([get, post])]),
     http_parameters(Request, [
@@ -69,14 +86,18 @@ update_stock(Request) :-
     ).
 
 % Endpoint "GET" para categoría:
-%% Endpoint: /category?type=frutas
+% Endpoint: /category?type=frutas
 category_handler(Request) :-
     cors_enable(Request, [methods([get])]),
     http_parameters(Request, [type(TypeStr, [atom])]),
-    atom_string(Type, TypeStr),
+    downcase_atom(TypeStr, TypeLower),
     findall(
-        json{name:Name, stock:Stock},
-        product(_, Name, Type, _, Stock, _, _),
+        json{name:Name, price:Price, stock:Stock},
+        (
+            product(_, Name, Category, Price, Stock, _, _),
+            downcase_atom(Category, CategoryLower),
+            CategoryLower = TypeLower
+        ),
         Results
     ),
     reply_json(Results).
@@ -87,15 +108,15 @@ normalize_place(Input, OutAtom) :-
     ;   string(Input) -> S0 = Input
     ;   term_string(Input, S0)
     ),
-    normalize_space(string(S1), S0),  % quita espacios duplicados
-    string_upper(S1, S2),             % convierte a MAYÚSCULAS
+    normalize_space(string(S1), S0),
+    string_upper(S1, S2),
     atom_string(OutAtom, S2).
 
 order_route_handler(Request) :-
     cors_enable(Request, [methods([get])]),
     http_parameters(Request, [order(OrderCode, [atom])]),
     (   delivery_place_from_csv(OrderCode, Place0)
-    ->  normalize_place(Place0, Place),   % opcional pero recomendable
+    ->  normalize_place(Place0, Place),
         default_origin(Origin),
         (   route_path(Origin, Place, Path)
         ->  length(Path, Hops),
@@ -103,7 +124,7 @@ order_route_handler(Request) :-
                 order: OrderCode,
                 origin: Origin,
                 delivery_place: Place,
-                steps: Path,            % <-- puntos visitados en orden
+                steps: Path,
                 hops: Hops
             })
         ;   reply_json(json{
@@ -127,15 +148,18 @@ delivery_place_from_csv(OrderCode, Place) :-
     ;   Data = Rows
     ),
     member(Row, Data),
-    arg(8, Row, OrderCode),   % column 8 = OrderCode
-    arg(5, Row, Place).       % column 5 = DeliveryPlace
+    arg(8, Row, OrderCode),
+    arg(5, Row, Place).
 
 % ========================
 % Crear Orden (POST)
 % http://localhost:8080/orders  RUTA
 % ========================
 orders_post_handler(Request) :-
-    cors_enable(Request, [methods([post])]),
+    cors_enable(Request, [
+        methods([post]),
+        headers(["content-type"])
+    ]),
     http_read_json_dict(Request, Data),
 
     Code = Data.code,
@@ -156,7 +180,7 @@ orders_post_handler(Request) :-
 
 % ========================
 % Listar Órdenes 
-%RUTA http://localhost:8080/orders/list
+% RUTA http://localhost:8080/orders/list
 % ========================
 orders_get_handler(Request) :-
     cors_enable(Request, [methods([get])]),
@@ -174,7 +198,7 @@ orders_get_handler(Request) :-
 
 % ========================
 % Actualizar Estado Orden
-%ruta http://localhost:8080/orders/update?orderCode=ORD0001&status=Entregado
+% ruta http://localhost:8080/orders/update?orderCode=ORD0001&status=Entregado
 % ========================
 update_order_status_handler(Request) :-
     cors_enable(Request, [methods([get, post])]),
@@ -214,3 +238,13 @@ update_order_status_handler(Request) :-
 replace_order(OrderCode, NewStatus, row(D,C,P,Q,DP,RN,_Old,OrderCode),
                                 row(D,C,P,Q,DP,RN,NewStatus,OrderCode)) :- !.
 replace_order(_, _, Row, Row).
+
+% ======================================================
+% ===============  CORS GLOBAL PARA TODO  ==============
+% ======================================================
+:- multifile http:allow_origin/2.
+
+http:allow_origin(_, _) :-
+    format('Access-Control-Allow-Origin: *~n'),
+    format('Access-Control-Allow-Methods: GET, POST, OPTIONS~n'),
+    format('Access-Control-Allow-Headers: Content-Type~n').
