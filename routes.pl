@@ -1,6 +1,6 @@
 :- module(routes, [
     default_origin/1,
-    route_path/3      % route_path(From, To, Path)
+    route_path/3     
 ]).
 
 :- use_module(library(lists)).

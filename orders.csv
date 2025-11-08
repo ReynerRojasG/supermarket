@@ -1,2 +1,6 @@
-2025-11-07 19:22:00,P0020,Manzana 458g,1,PASO CANOAS,Reyner,Pendiente,ORD1
-2025-11-07 19:22:00,P0020,Manzana 458g,1,PASO CANOAS,Reyner,Pendiente,ORD2
+Date,Code,Product,Quantity,DeliveryPlace,ReceiverName,Status,OrderCode
+2025-11-07 19:22:00,P0020,Manzana 458g,1,PASO CANOAS,Reyner,Cancelado,ORD1
+2025-11-07 19:22:00,P0020,Manzana 458g,1,LAUREL,Makin,Pendiente,ORD2
+2025-11-07 19:22:00,P0223,Manzana 332g,2,CIUDAD NEILY,Cipriano,Entregado,ORD3
+2025-11-07 19:22:00,P0020,Manzana 458g,3,RIO CLARO,Joseph,Pendiente,ORD4
+2025-11-08 04:02:31,P0263,Pizza congelada 339g,1,NARANJO,Isaac,Pendiente,ORD5

@@ -11,26 +11,27 @@
 :- http_handler(root(category), category_handler, []).
 :- http_handler(root(update), update_stock, []).
 
-:- use_module(library(csv)).        % read orders.csv
-:- use_module(routes).              % default_origin/1, route_path/3
+:- use_module(library(csv)).       
+:- use_module(routes).              
 :- use_module(orders).
 
 :- http_handler(root(order/route), order_route_handler, []).
 :- http_handler(root(orders), orders_post_handler, []).
 :- http_handler(root(orders/list), orders_get_handler, []).
 :- http_handler(root(orders/update), update_order_status_handler, []).
+:- http_handler(root(orders/create), orders_create_handler, []).
 
-
+% ========================
+% Iniciar servidor
+% ========================
 start_server(Port) :-
     http_server(http_dispatch, [port(Port)]),
     format('Servidor iniciado en el puerto ~w~n', [Port]).
 
 % ========================
-% Endpoint de productos
+% Endpoint: /products?name=Banano
+% Descripción: Busca productos por nombre (insensible a mayúsculas)
 % ========================
-
-% Búsqueda insensible, encuentra BANANO o Banano o banano
-% Endpoint "GET": /products?name=Banano
 products_handler(Request) :-
     cors_enable(Request, [methods([get])]),
     http_parameters(Request, [name(QueryAtom, [atom])]),
@@ -47,9 +48,10 @@ products_handler(Request) :-
     ),
     reply_json(Results).
 
-% Endpoint "UPDATE" para stock:
-%http://localhost:8080/update?code=P0001&quantity=50
-
+% ========================
+% Endpoint: /update?code=P0001&quantity=5
+% Descripción: Descuenta stock de un producto
+% ========================
 update_stock(Request) :-
     cors_enable(Request, [methods([get, post])]),
     http_parameters(Request, [
@@ -68,8 +70,10 @@ update_stock(Request) :-
     ;   reply_json(json{error: "Producto no encontrado"}, [status(404)])
     ).
 
-% Endpoint "GET" para categoría:
-%% Endpoint: /category?type=frutas
+% ========================
+% Endpoint: /category?type=frutas
+% Descripción: Lista productos por categoría
+% ========================
 category_handler(Request) :-
     cors_enable(Request, [methods([get])]),
     http_parameters(Request, [type(TypeStr, [atom])]),
@@ -81,21 +85,24 @@ category_handler(Request) :-
     ),
     reply_json(Results).
 
-% --- api.pl (helpers al final del archivo) ---
 normalize_place(Input, OutAtom) :-
     (   atom(Input)   -> atom_string(Input, S0)
     ;   string(Input) -> S0 = Input
     ;   term_string(Input, S0)
     ),
-    normalize_space(string(S1), S0),  % quita espacios duplicados
-    string_upper(S1, S2),             % convierte a MAYÚSCULAS
+    normalize_space(string(S1), S0),  
+    string_upper(S1, S2),           
     atom_string(OutAtom, S2).
 
+% ========================
+% Endpoint: /order/route?order=ORD0001
+% Descripción: Calcula ruta desde origen hasta destino de la orden
+% ========================
 order_route_handler(Request) :-
     cors_enable(Request, [methods([get])]),
     http_parameters(Request, [order(OrderCode, [atom])]),
     (   delivery_place_from_csv(OrderCode, Place0)
-    ->  normalize_place(Place0, Place),   % opcional pero recomendable
+    ->  normalize_place(Place0, Place), 
         default_origin(Origin),
         (   route_path(Origin, Place, Path)
         ->  length(Path, Hops),
@@ -103,7 +110,7 @@ order_route_handler(Request) :-
                 order: OrderCode,
                 origin: Origin,
                 delivery_place: Place,
-                steps: Path,            % <-- puntos visitados en orden
+                steps: Path,      
                 hops: Hops
             })
         ;   reply_json(json{
@@ -116,9 +123,9 @@ order_route_handler(Request) :-
     ;   reply_json(json{error: "Order not found", order: OrderCode}, [status(404)])
     ).
 
-% Extract DeliveryPlace from orders.csv given OrderCode
-% Expected header:
-% Date,Code,Product,Quantity,DeliveryPlace,ReceiverName,Status,OrderCode
+% ========================
+% Helper: Extrae lugar de entrega desde orders.csv
+% ========================
 delivery_place_from_csv(OrderCode, Place) :-
     exists_file('orders.csv'),
     csv_read_file('orders.csv', Rows, [functor(row), arity(8)]),
@@ -127,44 +134,52 @@ delivery_place_from_csv(OrderCode, Place) :-
     ;   Data = Rows
     ),
     member(Row, Data),
-    arg(8, Row, OrderCode),   % column 8 = OrderCode
-    arg(5, Row, Place).       % column 5 = DeliveryPlace
+    arg(8, Row, OrderCode),  
+    arg(5, Row, Place).       
 
 % ========================
-% Crear Orden (POST)
-% http://localhost:8080/orders  RUTA
+% Endpoint: /orders/create?...
+% Descripción: Crea una orden vía GET
 % ========================
-orders_post_handler(Request) :-
-    cors_enable(Request, [methods([post])]),
-    http_read_json_dict(Request, Data),
-
-    Code = Data.code,
-    Name = Data.name,
-    Quantity = Data.quantity,
-    DeliveryPlace = Data.deliveryPlace,
-    ReceiverName = Data.receiverName,
-    Date = Data.date,
-    ( _{status:S} :< Data -> Status = S ; Status = 'Pendiente' ),
-
+orders_create_handler(Request) :-
+    cors_enable(Request, [methods([get])]),
+    http_parameters(Request, [
+        code(Code, []),
+        name(Name, []),
+        quantity(Quantity, [integer]),
+        deliveryPlace(DeliveryPlace, []),
+        receiverName(ReceiverName, []),
+        date(Date, []),
+        status(Status, [optional('Pendiente')])
+    ]),
     next_order_code(OrderCode),
     log_order(Date, Code, Name, Quantity, DeliveryPlace, ReceiverName, Status, OrderCode),
-
     reply_json(json{
         status:"OK",
         orderCreated:OrderCode
     }).
 
 % ========================
-% Listar Órdenes 
-%RUTA http://localhost:8080/orders/list
+% Endpoint: /orders/list
+% Descripción: Lista todas las órdenes registradas
 % ========================
 orders_get_handler(Request) :-
     cors_enable(Request, [methods([get])]),
     (   exists_file('orders.csv')
     ->  csv_read_file('orders.csv', Rows, [functor(row), arity(8)]),
         Rows = [_H|Data],
+        findall(
+            json{date:D, code:C, product:P, quantity:Q, deliveryPlace:DP, receiverName:RN, status:S, orderCode:OC},
+            (member(row(D,C,P,Q,DP,RN,S,OC), Data)),
+            JsonList
+        ),
+        reply_json(JsonList)
+    ;   reply_json([], [status(200)])
+    ).
 
-%ruta http://localhost:8080/orders/update?orderCode=ORD0001&status=Entregado
+% ========================
+% Endpoint: /orders/update?orderCode=ORD0001&status=Entregado
+% Descripción: Actualiza el estado de una orden
 % ========================
 update_order_status_handler(Request) :-
     cors_enable(Request, [methods([get, post])]),
@@ -200,7 +215,9 @@ update_order_status_handler(Request) :-
     ;
         reply_json(json{error:"Orden no encontrada"}, [status(404)])
     ).
-
+% ========================
+% Helper: Reemplaza estado de orden específica
+% ========================
 replace_order(OrderCode, NewStatus, row(D,C,P,Q,DP,RN,_Old,OrderCode),
                                 row(D,C,P,Q,DP,RN,NewStatus,OrderCode)) :- !.
 replace_order(_, _, Row, Row).
